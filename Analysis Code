@@ -1,0 +1,256 @@
+# connecting to mySQL and creating database if first execution
+
+import mysql.connector
+
+mydb = mysql.connector.connect(
+host="localhost",
+user="root",
+password="*********")
+
+mycursor = mydb.cursor()
+
+mycursor.execute("SHOW DATABASES")
+
+for x in mycursor:
+    exist = False
+    if x == "supermarketdatabase":
+        exist = True
+    
+if exist:
+    mycursor.execute("CREATE DATABASE mydatabase")
+
+# connect to database in mySQL
+
+mydb = mysql.connector.connect(
+host="localhost",
+user="root",
+password="*********",
+database="supermarketdatabase")
+
+# importing csv files from directory
+
+import pandas as pd
+import os
+
+# function to segment text with more than whitespace
+def segment():
+    print("-------------------------------------------------------------------------------------")
+
+
+dir_name = r"C:\Users\harry\Desktop\Coding\supermarket_marketing"
+df_list = []
+count = 0
+for file in os.listdir(dir_name):
+    print("df", count, "is",file)
+    print()
+    # reading content into data frames
+    df = pd.read_csv(dir_name+"\\"+file, encoding = 'latin1')
+    df_list.append(df)
+    # exploring the shape and columns of each csv 
+    print(file, "shape is", df.shape)
+    print()
+    print(file, "columns are", df.columns)
+    print()
+    segment()
+    count+=1    
+
+
+# error from whoever entered the data so replacing " asparagus with asparagus"
+
+df_list[2] = df_list[2].replace([" asparagus"], 'asparagus')
+
+# adding column names to basket data
+
+columnNames = []
+for c in range(len(df_list[2].columns)):
+               name = "item"+str(c)
+               columnNames.append(name)
+            
+nameChangeDict = dict(zip(df_list[2].columns, columnNames))
+               
+
+df_list[2] = df_list[2].rename(columns=nameChangeDict)
+
+# replacing NaNs with "No item"
+
+df_list[2] = df_list[2].fillna("No item")
+
+# finding the unique items so that prices can be attached 
+
+items = []
+
+for column in df_list[2].columns:
+    for item in df_list[2][column].unique():
+        items.append(item)
+
+items = list(set(items))
+
+# removing nan 
+
+del items[0:2]
+
+# creating list of random prices 
+
+import random
+
+randomPrices = []
+
+for i in range(len(items)):
+    # any random float between 50.50 to 500.50
+    # don't use round() if you need number as it is
+    x = round(random.uniform(0.00, 5.00), 2)
+    randomPrices.append(x)
+
+# create a df from prices and items 
+
+priceItemDf = pd.DataFrame({"Item" : items, "Price" : randomPrices})
+
+# appending the df to df_list 
+
+df_list.append(priceItemDf)
+
+
+# calculating volumes and adding to df list
+
+volumes = []
+volume = 0
+for item in df_list[4]["Item"]:
+    for column in df_list[2].columns:
+        try:
+            volume = volume + df_list[2][column].value_counts()[item]
+        except:
+            continue
+    volumes.append(volume)
+    volume = 0
+
+    
+zipped = list(zip(df_list[4]["Item"], volumes))
+    
+df_list.append(pd.DataFrame(zipped, columns = ["Items","Volumes"]))
+
+
+# create string for executing create MySQL table 
+
+def createTableString(df):
+    name = input("Enter username:")
+    columns = ""
+    count = 0
+    for column in df.columns:
+        typ = type(df[column].iloc[0])
+        if column == df.columns[-1]:
+            if typ == str:
+                columns = columns + column + " varchar(255)"
+            else:
+                if typ == int:
+                     columns = columns + column + " " + "int"
+                if typ == float or complex:
+                     columns = columns + column + " " + "float"
+        else:
+            if typ == str:
+                columns = columns + column + " varchar(255)"+", "
+            else:
+                if typ == int:
+                     columns = columns + column + " " + "int"
+                if typ == float or complex:
+                     columns = columns + column + " " + "float"
+    start = "CREATE TABLE {tableName} ".format(tableName = name)
+    columns = start + "(" + columns + ");"
+    return name, columns
+    
+# create table in MySQL database 
+
+def createTable(tryName, tableString):
+    mycursor = mydb.cursor()
+    mycursor.execute('DROP TABLE IF EXISTS {name};'.format(name = tryName))
+    mycursor.execute(tableString)
+
+# automate creating string for entering values into MySQL table
+
+def createValueString(df):
+    valueString = ""
+    for i in range((len(df.iloc[0]))):
+        valueString = valueString + "%s"+","
+    return valueString[0:-1]
+
+
+# insert data into MySQL table
+
+def insertData(df, databaseName,tableName,valueString):
+    count = 0
+    mycursor = mydb.cursor()
+    for i,row in df.iterrows():
+        #here %S means string values 
+        sql = "INSERT INTO "+databaseName+"."+tableName+" VALUES("+valueString+")"
+        mycursor.execute(sql, tuple(row))
+        # this line saves changes
+        mydb.commit()
+        
+# importing basket data into mySQL
+
+
+name1, df2String = createTableString(df_list[2])
+createTable(name1, df2String)
+valueString1 = createValueString(df_list[2])
+insertData(df_list[2],"supermarketdatabase",name1,valueString1)
+
+# importing price data into mySQL
+
+
+name2, df4String = createTableString(df_list[4])
+createTable(name2, df4String)
+valueString2 = createValueString(df_list[4])
+insertData(df_list[4],"supermarketdatabase",name2,valueString2)
+
+# importing volumes into mySQL
+
+name3, df5String = createTableString(df_list[5])
+createTable(name3, df5String)
+valueString3 = createValueString(df_list[5])
+insertData(df_list[5],"supermarketdatabase",name3,valueString3)
+
+# method to remove some of the mySQL typing when executing queries using python
+
+def executeQuery(query, get = False):
+    mycursor = mydb.cursor()
+    query = query+";"
+    mycursor.execute(query)
+    myresult = mycursor.fetchall()
+    # optional variable to return result to python space
+    if get == True:
+        myresultList = [item for t in myresult for item in t]
+        return myresultList
+
+
+# getting item, volume of purchases and price by joining volume table and price table
+
+executeQuery("""Select volumeTable.Items, volumeTable.Volumes, priceTable.Price 
+FROM volumeTable 
+INNER JOIN priceTable 
+ON volumeTable.Items = priceTable.Item 
+ORDER BY Items""")
+
+# finding how many items have a price greater than four pound and a larger basket volume than 100
+
+executeQuery("""Select COUNT(items) 
+FROM priceTable
+INNER JOIN volumeTable
+ON volumeTable.Items = priceTable.Item
+WHERE priceTable.Price > 4 AND volumeTable.Volumes > 100
+ORDER BY Items""")
+
+# creating price catagories and counting the number of items and total volumes in each price catagory 
+
+executeQuery("""
+SELECT 
+    COUNT(items), 
+    SUM(Volumes),
+    CASE 
+        WHEN Price < 1.50 THEN 'Affordable'
+        WHEN Price > 1.50 AND Price < 3 THEN 'Mid-range'
+        ELSE 'Expensive'
+    END AS PriceCatagory
+FROM priceTable
+INNER JOIN volumeTable
+ON volumeTable.Items = priceTable.Item
+GROUP BY PriceCatagory
+ORDER BY Volumes ASC""")
